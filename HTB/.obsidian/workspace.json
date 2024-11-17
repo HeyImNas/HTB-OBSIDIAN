@@ -100,7 +100,7 @@
                 "showSearch": false,
                 "searchQuery": "",
                 "backlinkCollapsed": false,
-                "unlinkedCollapsed": true
+                "unlinkedCollapsed": false
               },
               "icon": "links-coming-in",
               "title": "Backlinks for Starting Lab Writeups"
@@ -158,10 +158,10 @@
       "command-palette:Open command palette": false
     }
   },
-  "active": "1af7440ba6144ff3",
+  "active": "09589fcc79fb7241",
   "lastOpenFiles": [
-    "Welcome.md",
     "VqKjp5f.png",
+    "Welcome.md",
     "Starting Lab Writeups.md",
     "VqKjp5f 1.png",
     "VqKjp5f 2.png"

